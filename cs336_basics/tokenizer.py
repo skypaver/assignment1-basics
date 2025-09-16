@@ -8,6 +8,34 @@ from utils.max_heap import MaxHeap
 GPT2_PRETOKENIZER_PATTERN = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 
 
+def get_stats(ids: List[int], count=None) -> Dict[Tuple, int]:
+    count = {} if count is None else count
+    for pair in zip(ids[:-1], ids[1:]):
+        count[pair] = count.get(pair, 0) + 1
+
+    return count
+
+# def update_stats(ids: List[int], pair: Tuple[int, int], idx: int, count: Dict[Tuple, int]) -> Dict[Tuple, int]:
+#     new_count = {}
+#     for i, (k, v) in enumerate(count.items()):
+#         if k == pair:
+#             continue
+#         if k[1] == pair[0] &&
+
+
+def merge(ids: List[int], pair: Tuple[int, int], idx: int) -> List[int]:
+    new_ids = []
+    i = 0
+    while i < len(ids):
+        if i < len(ids) - 1 and ids[i] == pair[0] and ids[i + 1] == pair[1]:
+            new_ids.append(idx)
+            i += 2
+        else:
+            new_ids.append(ids[i])
+            i += 1
+    return new_ids
+
+
 class BPETokenizer:
     def __init__(self, special_tokens={}):
         self.vocab = {}
@@ -58,6 +86,7 @@ class BPETokenizer:
         num_merges = vocab_size - 256 - len(self.special_tokens)
 
         text_chunks = self.pre_tokenize(text, num_processes)
+        print(text_chunks)
 
         ids = [list(chunk.encode("utf-8")) for chunk in text_chunks]
 
@@ -88,14 +117,31 @@ class BPETokenizer:
 
         return
 
-    def encode(self, text):
-        text_chunks = re.findall(self.compiled_pattern, text)
+    def encode(self, text: str, allow_special=True):
+        if not allow_special:
+            text_chunks = re.findall(self.compiled_pattern, text)
 
-        ids = []
-        for chunk in text_chunks:
-            chunk_ids = list(chunk.encode("utf-8"))
-            chunk_encode = self._encode_chunk(chunk_ids)
-            ids.extend(chunk_encode)
+            ids = []
+            for chunk in text_chunks:
+                chunk_ids = list(chunk.encode("utf-8"))
+                chunk_encode = self._encode_chunk(chunk_ids)
+                ids.extend(chunk_encode)
+
+        else:
+            # escaped_st = [re.escape(st) for st in self.special_tokens.keys()]
+            # split_token = "|".join(escaped_st)
+            special_pattern = "(" + "|".join(re.escape(k) for k in self.special_tokens) + ")"
+            special_chunks = [chunk for chunk in re.split(special_pattern, text) if chunk]
+            print(special_chunks)
+
+            ids = []
+            for chunk in special_chunks:
+                if chunk in self.special_tokens:
+                    ids.append(self.special_tokens[chunk])
+                else:
+                    chunk_ids = list(chunk.encode("utf-8"))
+                    chunk_encode = self._encode_chunk(chunk_ids)
+                    ids.extend(chunk_encode)
 
         return ids
 
@@ -110,60 +156,40 @@ class BPETokenizer:
         return ids
 
     def decode(self, ids):
-        text_bytes = b"".join(self.vocab[idx] for idx in ids)
+        bytes_lst = []
+        for idx in ids:
+            if idx in self.vocab:
+                bytes_lst.append(self.vocab[idx])
+            elif idx in self.inverse_special_tokens:
+                bytes_lst.append(self.inverse_special_tokens[idx])
+            else:
+                raise ValueError
+        text_bytes = b"".join(bytes_lst)
         text = text_bytes.decode("utf-8", errors="replace")
 
         return text
 
     def save(self, filename: str = "train_v1"):
         model_file = "../save/" + filename + ".model"
-        with open(model_file, "w") as f1:
+        with open(model_file, "w+") as f1:
             f1.write("bpe tokenizer v1\n")
             for idx1, idx2 in self.merges:
                 f1.write(f"{idx1} {idx2}\n")
 
         vocab_file = "../save/" + filename + ".vocab"
-        with open(vocab_file, "wb") as f2:
+        with open(vocab_file, "wb+") as f2:
             pickle.dump(self.vocab, f2)
 
     def register_special_tokens(self, special_tokens: List[str]):
         self.special_tokens = special_tokens
-        self.inverse_special_tokens = {v: k for k, v in special_tokens.items()}
-
-
-def get_stats(ids: List[int], count=None) -> Dict[Tuple, int]:
-    count = {} if count is None else count
-    for pair in zip(ids[:-1], ids[1:]):
-        count[pair] = count.get(pair, 0) + 1
-
-    return count
-
-
-# def update_stats(ids: List[int], pair: Tuple[int, int], idx: int, count: Dict[Tuple, int]) -> Dict[Tuple, int]:
-#     new_count = {}
-#     for i, (k, v) in enumerate(count.items()):
-#         if k == pair:
-#             continue
-#         if k[1] == pair[0] &&
-
-
-def merge(ids: List[int], pair: Tuple[int, int], idx: int) -> List[int]:
-    new_ids = []
-    i = 0
-    while i < len(ids):
-        if i < len(ids) - 1 and ids[i] == pair[0] and ids[i + 1] == pair[1]:
-            new_ids.append(idx)
-            i += 2
-        else:
-            new_ids.append(ids[i])
-            i += 1
-    return new_ids
+        self.inverse_special_tokens = {v: bytes(k.encode("utf-8")) for k, v in special_tokens.items()}
 
 
 if __name__ == "__main__":
-    tokenizer = BPETokenizer()
-    tokenizer.train("hihihi, LMAO", True)
-    e = tokenizer.encode("111hihihihi")
+    tokenizer = BPETokenizer({'<|endoftext|>': 256,'<|fim_prefix|>': 257})
+    tokenizer.train("hihihi, LMAO<|endoftext|>", 2000, verbose=True)
+    e = tokenizer.encode("111hihihihi<|endoftext|>")
     d = tokenizer.decode(e)
-    print(e)
-    print(d)
+    print(tokenizer.vocab)
+    print(f"e:{e}")
+    print(f"d:{d}")

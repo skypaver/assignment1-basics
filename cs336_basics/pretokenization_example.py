@@ -98,13 +98,13 @@ if __name__ == "__main__":
 
     vocab_size = 10000
     special_tokens = {
-        '<|endoftext|>': 100257,
-        # '<|fim_prefix|>': 100258,
-        # '<|fim_middle|>': 100259,
-        # '<|fim_suffix|>': 100260,
-        # '<|endofprompt|>': 100276
+        '<|endoftext|>': 256,
+        '<|fim_prefix|>': 257,
+        '<|fim_middle|>': 258,
+        '<|fim_suffix|>': 259,
+        '<|endofprompt|>': 260
     }
-    sample_size = 22
+    sample_size = 20
     num_processes = 8
     train_path = "/Users/bytedance/workspace/assignment1-basics/data/owt_valid.txt"
 
@@ -112,5 +112,8 @@ if __name__ == "__main__":
 
     tokenizer = tokenizer.BPETokenizer(special_tokens)
     tokenizer.train(sample, vocab_size, num_processes=num_processes, verbose=True)
-
-
+    e = tokenizer.encode("hihihihihi, hi, 你好你好，你好 <|endoftext|>")
+    d = tokenizer.decode(e)
+    print(tokenizer.vocab)
+    print(f"e:{e}")
+    print(f"d:{d}")
