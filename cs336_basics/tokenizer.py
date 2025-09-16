@@ -15,25 +15,47 @@ def get_stats(ids: List[int], count=None) -> Dict[Tuple, int]:
 
     return count
 
-# def update_stats(ids: List[int], pair: Tuple[int, int], idx: int, count: Dict[Tuple, int]) -> Dict[Tuple, int]:
-#     new_count = {}
-#     for i, (k, v) in enumerate(count.items()):
-#         if k == pair:
-#             continue
-#         if k[1] == pair[0] &&
+
+def update_stats(stats: Dict[Tuple, int], new_ids: List[int], pair: Tuple[int, int], new_idx: int,
+                 new_pos: List[int]) -> Dict[Tuple, int]:
+    if pair in stats:
+        del stats[pair]
+
+    for pos in new_pos:
+        if pos > 0:
+            l_neighbor = new_ids[pos - 1]
+            old_l_pair = (l_neighbor, pair[0])
+            if old_l_pair in stats:
+                stats[old_l_pair] -= 1
+                if stats[old_l_pair] <= 0:
+                    del stats[old_l_pair]
+            new_l_pair = (l_neighbor, new_idx)
+            stats[new_l_pair] = stats.get(new_l_pair, 0) + 1
+
+        if pos < len(new_pos) - 1:
+            r_neighbor = new_ids[pos + 1]
+            old_r_pair = (pair[1], r_neighbor)
+            if old_r_pair in stats:
+                stats[old_r_pair] -= 1
+                if stats[old_r_pair] <= 0:
+                    del stats[old_r_pair]
+            new_r_pair = (new_idx, r_neighbor)
+            stats[new_r_pair] = stats.get(new_r_pair, 0) + 1
 
 
-def merge(ids: List[int], pair: Tuple[int, int], idx: int) -> List[int]:
+def merge(ids: List[int], pair: Tuple[int, int], idx: int) -> Tuple[List[int], List[int]]:
     new_ids = []
+    new_pos = []
     i = 0
     while i < len(ids):
         if i < len(ids) - 1 and ids[i] == pair[0] and ids[i + 1] == pair[1]:
             new_ids.append(idx)
+            new_pos.append(len(new_ids) - 1)
             i += 2
         else:
             new_ids.append(ids[i])
             i += 1
-    return new_ids
+    return new_ids, new_pos
 
 
 class BPETokenizer:
@@ -93,22 +115,28 @@ class BPETokenizer:
         merges = {}
         vocab = {idx: bytes([idx]) for idx in range(256)}
 
+        stats = {}
+        for chunk_ids in ids:
+            get_stats(chunk_ids, stats)
+
         for i in range(num_merges):
-            stats = {}
-            for chunk_ids in ids:
-                get_stats(chunk_ids, stats)
             pair = max(stats, key=stats.get)
             if stats[pair] == 1:
                 break
 
             idx = 256 + len(self.special_tokens) + i
-            ids = [merge(chunk_ids, pair, idx) for chunk_ids in ids]
+
+            if verbose:
+                print(f"merge {i + 1}/{num_merges}: {pair} -> {idx} ({vocab[pair[0]] + vocab[pair[1]]}) had {stats[pair]} occurrences")
+
+            new_ids_lst = []
+            for chunk_ids in ids:
+                new_ids, new_pos = merge(chunk_ids, pair, idx)
+                new_ids_lst.append(new_ids)
+                update_stats(stats, new_ids, pair, idx, new_pos)
 
             vocab[idx] = vocab[pair[0]] + vocab[pair[1]]
             merges[pair] = idx
-
-            if verbose:
-                print(f"merge {i + 1}/{num_merges}: {pair} -> {idx} ({vocab[idx]}) had {stats[pair]} occurrences")
 
         self.vocab = vocab
         self.merges = merges
@@ -189,7 +217,7 @@ class BPETokenizer:
 
 
 if __name__ == "__main__":
-    tokenizer = BPETokenizer({'<|endoftext|>': 256,'<|fim_prefix|>': 257})
+    tokenizer = BPETokenizer({'<|endoftext|>': 256, '<|fim_prefix|>': 257})
     tokenizer.train("hihihi, LMAO<|endoftext|>", 2000, verbose=True)
     e = tokenizer.encode("111hihihihi<|endoftext|>")
     d = tokenizer.decode(e)

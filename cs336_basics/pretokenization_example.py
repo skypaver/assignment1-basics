@@ -96,7 +96,7 @@ def load_and_sample_file(filepath: str, sample_size: int = 22000, special_token:
 
 if __name__ == "__main__":
 
-    vocab_size = 20000
+    vocab_size = 10000
     special_tokens = {
         '<|endoftext|>': 256,
         '<|fim_prefix|>': 257,
@@ -104,7 +104,7 @@ if __name__ == "__main__":
         '<|fim_suffix|>': 259,
         '<|endofprompt|>': 260
     }
-    sample_size = float("inf")
+    sample_size = 200  # float("inf")
     num_processes = 8
     train_path = "/Users/bytedance/workspace/assignment1-basics/data/owt_valid.txt"
 
