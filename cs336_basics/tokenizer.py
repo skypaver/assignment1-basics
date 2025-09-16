@@ -92,9 +92,9 @@ class BPETokenizer:
 
         merges = {}
         vocab = {idx: bytes([idx]) for idx in range(256)}
-        stats = {}
 
         for i in range(num_merges):
+            stats = {}
             for chunk_ids in ids:
                 get_stats(chunk_ids, stats)
             pair = max(stats, key=stats.get)
@@ -173,8 +173,11 @@ class BPETokenizer:
         model_file = "../save/" + filename + ".model"
         with open(model_file, "w+") as f1:
             f1.write("bpe tokenizer v1\n")
-            for idx1, idx2 in self.merges:
-                f1.write(f"{idx1} {idx2}\n")
+            f1.write(f"{self.pattern}\n")
+            for special, idx in self.special_tokens.items():
+                f1.write(f"{special} {idx}\n")
+            for k, v in self.merges.items():
+                f1.write(f"{k} {v}\n")
 
         vocab_file = "../save/" + filename + ".vocab"
         with open(vocab_file, "wb+") as f2:
