@@ -1,11 +1,13 @@
 import heapq
 import multiprocessing
+# from multiprocessing import Manager
 from typing import Dict, Tuple, List
 import pickle
 import regex as re
 from tqdm import tqdm
 import logging
 import time
+# from functools import partial
 
 GPT2_PRETOKENIZER_PATTERN = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 
@@ -13,13 +15,13 @@ logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(message)s',  # 可以包含时间戳
         handlers=[
-            logging.FileHandler("../save/logs.txt"),  # 写入文件
+            logging.FileHandler("../logs/logs.txt"),  # 写入文件
             # logging.StreamHandler()  # 同时输出到控制台
         ]
     )
 
 
-def get_stats(ids: List[int], count=None) -> Dict[Tuple, int]:
+def get_stats(ids, count=None) -> Dict[Tuple, int]:
     count = {} if count is None else count
     for pair in zip(ids[:-1], ids[1:]):
         count[pair] = count.get(pair, 0) + 1
@@ -92,6 +94,29 @@ def merge(ids: List[int], pair: Tuple[int, int], idx: int) -> Tuple[List[int], L
     return new_ids, new_pos
 
 
+def pre_tokenize_doc(doc: str) -> List[str]:
+    compiled_pattern = re.compile(GPT2_PRETOKENIZER_PATTERN)
+    chunk = re.findall(compiled_pattern, doc)
+    return chunk
+
+
+def utf8_chunk_encoder(chunk: str) -> List[bytes]:
+    return list(chunk.encode("utf-8"))
+
+
+def merge_chunk_wrapper(args):
+    ids, pair, idx = args
+    new_ids, new_pos = merge(ids, pair, idx)
+    return new_ids, new_pos
+
+
+def update_stats_wrapper(args, stats_lock, heap_lock, stats, heap):
+    new_ids, new_pos, pair, idx = args
+    with stats_lock, heap_lock:
+        update_stats(stats, new_ids, pair, idx, new_pos, heap)
+    return
+
+
 class BPETokenizer:
     def __init__(self, special_tokens={}):
         self.vocab = {}
@@ -105,21 +130,21 @@ class BPETokenizer:
         self.compiled_pattern = re.compile(self.pattern)
 
         self.heap = []
-
-    def pre_tokenize_doc(self, doc: str) -> List[str]:
-        chunk = re.findall(self.compiled_pattern, doc)
-        return chunk
+        #
+        # self.manager = Manager()
+        # self.stats_lock = self.manager.Lock()  # 用于stats的线程安全操作
+        # self.heap_lock = self.manager.Lock()  # 用于heap的线程安全操作
 
     def pre_tokenize(self, text: str, num_processes: int = 8) -> List[str]:
         if not self.special_tokens.keys():
-            return [seq for seq in self.pre_tokenize_doc(text)]
+            return [seq for seq in pre_tokenize_doc(text)]
 
         escaped_st = [re.escape(st) for st in self.special_tokens.keys()]
         split_token = "|".join(escaped_st)
         docs = [plot for plot in re.split(split_token, text) if plot]
 
         if num_processes <= 1:
-            result_generator = (seq for doc in docs for seq in self.pre_tokenize_doc(doc))
+            result_generator = (seq for doc in docs for seq in pre_tokenize_doc(doc))
             result = list(tqdm(
                 result_generator,
                 total=len(docs),
@@ -129,7 +154,7 @@ class BPETokenizer:
 
         with multiprocessing.Pool(num_processes) as pool:
             results = list(tqdm(
-                pool.imap(self.pre_tokenize_doc, docs, chunksize=50),
+                pool.imap(pre_tokenize_doc, docs, chunksize=int(len(docs)/num_processes + 1)),
                 total=len(docs),
                 desc="pre-tokenize",
                 position=0,
@@ -137,12 +162,9 @@ class BPETokenizer:
             ))
         return [seq for doc_seq in results for seq in doc_seq]
 
-    def utf8_chunk_encoder(self, chunk: str) -> List[bytes]:
-        return list(chunk.encode("utf-8"))
-
     def utf8_multi_encoder(self, text_chunks: List[str], num_processes: int = 8) -> List[List[bytes]]:
         if num_processes <= 1:
-            result_generator = (self.utf8_chunk_encoder(chunk) for chunk in text_chunks)
+            result_generator = (utf8_chunk_encoder(chunk) for chunk in text_chunks)
             result = list(tqdm(
                 result_generator,
                 total=len(text_chunks),
@@ -152,15 +174,17 @@ class BPETokenizer:
 
         with multiprocessing.Pool(num_processes) as pool:
             results = list(tqdm(
-                pool.imap(self.utf8_chunk_encoder, text_chunks, chunksize=5000),
+                pool.imap(utf8_chunk_encoder, text_chunks, chunksize=int(len(text_chunks)/num_processes + 1)),
                 total=len(text_chunks),
                 desc="utf8-chunk-encode",
                 position=0,
-                leave=True
+                leave=True,
+                mininterval=1
             ))
         return [utf8_seq for utf8_seq in results]
 
     def train(self, text: str, vocab_size: int, num_processes: int = 8, verbose=False):
+        logging.info(f" ------<! New Training !>------ ")
         if vocab_size < 256 + len(self.special_tokens):
             raise ValueError
 
@@ -171,9 +195,11 @@ class BPETokenizer:
         logging.info(f"pre-tokenize time: {time.time() - pre_tokenize_time: .2f}")
         # print(text_chunks)
 
-        utf8_chunk_encode_time = time.time()
-        ids = self.utf8_multi_encoder(text_chunks, num_processes)
-        logging.info(f"utf8_chunk_encode_time: {time.time() - utf8_chunk_encode_time: .2f}")
+        # utf8_chunk_encode_time = time.time()
+        # ids = self.utf8_multi_encoder(text_chunks, num_processes)
+        # logging.info(f"utf8_chunk_encode_time: {time.time() - utf8_chunk_encode_time: .2f}")
+        ids = text_chunks
+        logging.info(f"-- {len(ids)} chunks in ids --")
         # print(ids)
         # ids = []
         # for chunk in tqdm(text_chunks, desc="encode chunk"):
@@ -183,41 +209,71 @@ class BPETokenizer:
         vocab = {idx: bytes([idx]) for idx in range(256)}
 
         stats = {}
-        get_stats_chunks_time = time.time()
+        # get_stats_chunks_time = time.time()
         for chunk_ids in tqdm(ids, desc="get_stats chunks"):
-            get_stats(chunk_ids, stats)
-        logging.info(f"get_stats_chunks_time: {time.time() - get_stats_chunks_time: .2f}")
+            get_stats(chunk_ids.encode("utf-8"), stats)
+        # logging.info(f"get_stats_chunks_time: {time.time() - get_stats_chunks_time: .2f}")
 
         init_heap_time = time.time()
         init_max_heap(self.heap, stats)
         logging.info(f"init_heap_time: {time.time() - init_heap_time: .2f}")
 
-        for i in tqdm(range(num_merges), desc="train"):
-            # pair = max(stats, key=stats.get)
-            # if stats[pair] == 1:
-            #     break
-            get_max_freq_pair_time = time.time()
-            pair = get_max_freq_pair(self.heap, stats)
-            logging.info(f"get_max_freq_pair_time: {time.time() - get_max_freq_pair_time: .2f}, num_merge: {i}")
-            if pair is None:
-                break
+        with multiprocessing.Pool(num_processes) as pool:
+            for i in tqdm(range(num_merges), desc="train"):
+                # pair = max(stats, key=stats.get)
+                # if stats[pair] == 1:
+                #     break
+                get_max_freq_pair_time = time.time()
+                pair = get_max_freq_pair(self.heap, stats)
+                logging.info(f"get_max_freq_pair_time: {time.time() - get_max_freq_pair_time: .2f}, num_merge: {i}")
+                if pair is None:
+                    break
 
-            idx = 256 + len(self.special_tokens) + i
+                idx = 256 + len(self.special_tokens) + i
 
-            if verbose:
-                log_message = f"merge {i + 1}/{num_merges}: {pair} -> {idx} ({vocab[pair[0]] + vocab[pair[1]]}) had {stats[pair]} occurrences",
-                logging.info(log_message)
+                if verbose:
+                    log_message = f"merge {i + 1}/{num_merges}: {pair} -> {idx} ({vocab[pair[0]] + vocab[pair[1]]}) had {stats[pair]} occurrences",
+                    logging.info(log_message)
 
-            merge_and_update_stats_time = time.time()
-            new_ids_lst = []
-            for chunk_ids in ids:
-                new_ids, new_pos = merge(chunk_ids, pair, idx)
-                new_ids_lst.append(new_ids)
-                update_stats(stats, new_ids, pair, idx, new_pos, self.heap)
-            logging.info(f"merge_and_update_stats_time: {time.time() - merge_and_update_stats_time: .2f}")
+                merge_time = time.time()
+                merge_args = [(chunk_ids, pair, idx) for chunk_ids in ids]
+                results = list(
+                    pool.imap(merge_chunk_wrapper, merge_args, chunksize=int(len(ids)/num_processes + 1)),
+                    # total=len(ids),
+                    # desc="merge",
+                    # leave=True
+                )
+                # logging.info(f"merge_time: {time.time() - merge_time: .2f}")
 
-            vocab[idx] = vocab[pair[0]] + vocab[pair[1]]
-            merges[pair] = idx
+                # update_stats_time = time.time()
+                # update_args = [(new_ids, new_pos, pair, idx) for new_ids, new_pos in results]
+                # bound_update_func = partial(
+                #     update_stats_wrapper,
+                #     stats_lock=self.stats_lock,
+                #     heap_lock=self.heap_lock,
+                #     stats=stats,
+                #     heap=self.heap
+                # )
+                # list(tqdm(
+                #     pool.imap(bound_update_func, update_args, chunksize=int(len(ids)/num_processes + 1)),
+                #     total=len(results),
+                #     desc="update stats",
+                #     leave=True
+                # ))
+                # logging.info(f"update_stats_time: {time.time() - update_stats_time: .2f}")
+
+                # for chunk_ids in ids:
+                for new_ids, new_pos in results:
+                    # merge_time = time.time()
+                    # new_ids, new_pos = merge(chunk_ids, pair, idx)
+                    # logging.info(f"merge_time: {time.time() - merge_time: .2f}")
+                    # update_stats_time = time.time()
+                    update_stats(stats, new_ids, pair, idx, new_pos, self.heap)
+                    # logging.info(f"update_stats_time: {time.time() - update_stats_time: .2f}")
+                logging.info(f"merge&update_stats_time: {time.time() - merge_time: .2f}")
+
+                vocab[idx] = vocab[pair[0]] + vocab[pair[1]]
+                merges[pair] = idx
 
         self.vocab = vocab
         self.merges = merges

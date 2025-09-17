@@ -115,8 +115,8 @@ if __name__ == "__main__":
         '<|endofprompt|>': 260
     }
     # sample_size = float("inf")
-    sample_size = 200000
-    num_processes = 16
+    sample_size = 20000
+    num_processes = 8
     # train_path = "/Users/bytedance/workspace/assignment1-basics/data/owt_valid.txt"
     train_path = "/Users/bytedance/workspace/assignment1-basics/data/TinyStoriesV2-GPT4-train.txt"
 
