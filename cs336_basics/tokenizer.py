@@ -1,11 +1,22 @@
+import heapq
 import multiprocessing
 from typing import Dict, Tuple, List
 import pickle
 import regex as re
 from tqdm import tqdm
-from utils.max_heap import MaxHeap
+import logging
+import time
 
 GPT2_PRETOKENIZER_PATTERN = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+
+logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(message)s',  # 可以包含时间戳
+        handlers=[
+            logging.FileHandler("../save/logs.txt"),  # 写入文件
+            # logging.StreamHandler()  # 同时输出到控制台
+        ]
+    )
 
 
 def get_stats(ids: List[int], count=None) -> Dict[Tuple, int]:
@@ -17,7 +28,7 @@ def get_stats(ids: List[int], count=None) -> Dict[Tuple, int]:
 
 
 def update_stats(stats: Dict[Tuple, int], new_ids: List[int], pair: Tuple[int, int], new_idx: int,
-                 new_pos: List[int]) -> Dict[Tuple, int]:
+                 new_pos: List[int], heap) -> Dict[Tuple, int]:
     if pair in stats:
         del stats[pair]
 
@@ -27,20 +38,43 @@ def update_stats(stats: Dict[Tuple, int], new_ids: List[int], pair: Tuple[int, i
             old_l_pair = (l_neighbor, pair[0])
             if old_l_pair in stats:
                 stats[old_l_pair] -= 1
+                if stats[old_l_pair] > 1:
+                    heapq.heappush(heap, (-stats[old_l_pair], old_l_pair))
                 if stats[old_l_pair] <= 0:
                     del stats[old_l_pair]
+
             new_l_pair = (l_neighbor, new_idx)
             stats[new_l_pair] = stats.get(new_l_pair, 0) + 1
+            heapq.heappush(heap, (-stats[new_l_pair], new_l_pair)) if stats[new_l_pair] > 1 else None
 
         if pos < len(new_pos) - 1:
             r_neighbor = new_ids[pos + 1]
             old_r_pair = (pair[1], r_neighbor)
             if old_r_pair in stats:
                 stats[old_r_pair] -= 1
+                if stats[old_r_pair] > 1:
+                    heapq.heappush(heap, (-stats[old_r_pair], old_r_pair))
                 if stats[old_r_pair] <= 0:
                     del stats[old_r_pair]
+
             new_r_pair = (new_idx, r_neighbor)
             stats[new_r_pair] = stats.get(new_r_pair, 0) + 1
+            heapq.heappush(heap, (-stats[new_r_pair], new_r_pair)) if stats[new_r_pair] > 1 else None
+
+
+def init_max_heap(heap, stats):
+    for pair, count in stats.items():
+        if count > 1:
+            heapq.heappush(heap, (-count, pair))
+    return heap
+
+
+def get_max_freq_pair(heap, stats):
+    while heap:
+        neg_count, pair = heapq.heappop(heap)
+        if -neg_count > 1 and -neg_count == stats.get(pair, -1):
+            return pair
+    return None
 
 
 def merge(ids: List[int], pair: Tuple[int, int], idx: int) -> Tuple[List[int], List[int]]:
@@ -70,7 +104,7 @@ class BPETokenizer:
         self.pattern = GPT2_PRETOKENIZER_PATTERN
         self.compiled_pattern = re.compile(self.pattern)
 
-        self.seq = []
+        self.heap = []
 
     def pre_tokenize_doc(self, doc: str) -> List[str]:
         chunk = re.findall(self.compiled_pattern, doc)
@@ -95,11 +129,36 @@ class BPETokenizer:
 
         with multiprocessing.Pool(num_processes) as pool:
             results = list(tqdm(
-                pool.imap_unordered(self.pre_tokenize_doc, docs, chunksize=50),
+                pool.imap(self.pre_tokenize_doc, docs, chunksize=50),
                 total=len(docs),
                 desc="pre-tokenize",
+                position=0,
+                leave=True
             ))
         return [seq for doc_seq in results for seq in doc_seq]
+
+    def utf8_chunk_encoder(self, chunk: str) -> List[bytes]:
+        return list(chunk.encode("utf-8"))
+
+    def utf8_multi_encoder(self, text_chunks: List[str], num_processes: int = 8) -> List[List[bytes]]:
+        if num_processes <= 1:
+            result_generator = (self.utf8_chunk_encoder(chunk) for chunk in text_chunks)
+            result = list(tqdm(
+                result_generator,
+                total=len(text_chunks),
+                desc="utf8-chunk-encode",
+            ))
+            return result
+
+        with multiprocessing.Pool(num_processes) as pool:
+            results = list(tqdm(
+                pool.imap(self.utf8_chunk_encoder, text_chunks, chunksize=5000),
+                total=len(text_chunks),
+                desc="utf8-chunk-encode",
+                position=0,
+                leave=True
+            ))
+        return [utf8_seq for utf8_seq in results]
 
     def train(self, text: str, vocab_size: int, num_processes: int = 8, verbose=False):
         if vocab_size < 256 + len(self.special_tokens):
@@ -107,33 +166,55 @@ class BPETokenizer:
 
         num_merges = vocab_size - 256 - len(self.special_tokens)
 
+        pre_tokenize_time = time.time()
         text_chunks = self.pre_tokenize(text, num_processes)
-        print(text_chunks)
+        logging.info(f"pre-tokenize time: {time.time() - pre_tokenize_time: .2f}")
+        # print(text_chunks)
 
-        ids = [list(chunk.encode("utf-8")) for chunk in text_chunks]
+        utf8_chunk_encode_time = time.time()
+        ids = self.utf8_multi_encoder(text_chunks, num_processes)
+        logging.info(f"utf8_chunk_encode_time: {time.time() - utf8_chunk_encode_time: .2f}")
+        # print(ids)
+        # ids = []
+        # for chunk in tqdm(text_chunks, desc="encode chunk"):
+        #     ids.append(list(chunk.encode("utf-8")))
 
         merges = {}
         vocab = {idx: bytes([idx]) for idx in range(256)}
 
         stats = {}
-        for chunk_ids in ids:
+        get_stats_chunks_time = time.time()
+        for chunk_ids in tqdm(ids, desc="get_stats chunks"):
             get_stats(chunk_ids, stats)
+        logging.info(f"get_stats_chunks_time: {time.time() - get_stats_chunks_time: .2f}")
 
-        for i in range(num_merges):
-            pair = max(stats, key=stats.get)
-            if stats[pair] == 1:
+        init_heap_time = time.time()
+        init_max_heap(self.heap, stats)
+        logging.info(f"init_heap_time: {time.time() - init_heap_time: .2f}")
+
+        for i in tqdm(range(num_merges), desc="train"):
+            # pair = max(stats, key=stats.get)
+            # if stats[pair] == 1:
+            #     break
+            get_max_freq_pair_time = time.time()
+            pair = get_max_freq_pair(self.heap, stats)
+            logging.info(f"get_max_freq_pair_time: {time.time() - get_max_freq_pair_time: .2f}, num_merge: {i}")
+            if pair is None:
                 break
 
             idx = 256 + len(self.special_tokens) + i
 
             if verbose:
-                print(f"merge {i + 1}/{num_merges}: {pair} -> {idx} ({vocab[pair[0]] + vocab[pair[1]]}) had {stats[pair]} occurrences")
+                log_message = f"merge {i + 1}/{num_merges}: {pair} -> {idx} ({vocab[pair[0]] + vocab[pair[1]]}) had {stats[pair]} occurrences",
+                logging.info(log_message)
 
+            merge_and_update_stats_time = time.time()
             new_ids_lst = []
             for chunk_ids in ids:
                 new_ids, new_pos = merge(chunk_ids, pair, idx)
                 new_ids_lst.append(new_ids)
-                update_stats(stats, new_ids, pair, idx, new_pos)
+                update_stats(stats, new_ids, pair, idx, new_pos, self.heap)
+            logging.info(f"merge_and_update_stats_time: {time.time() - merge_and_update_stats_time: .2f}")
 
             vocab[idx] = vocab[pair[0]] + vocab[pair[1]]
             merges[pair] = idx
@@ -179,8 +260,7 @@ class BPETokenizer:
             pair = min(stats, key=lambda p: self.merges.get(p, float("inf")))
             if pair not in self.merges:
                 break
-            ids = merge(ids, pair, self.merges[pair])
-
+            ids, _ = merge(ids, pair, self.merges[pair])
         return ids
 
     def decode(self, ids):
@@ -211,7 +291,7 @@ class BPETokenizer:
         with open(vocab_file, "wb+") as f2:
             pickle.dump(self.vocab, f2)
 
-    def load(self, filename: str = "train_v1") -> "BPETokenizer":
+    def load(self, filename: str = "train_v1"):
         """从保存的文件加载BPETokenizer实例"""
         model_file = "../save/" + filename + ".model"
         vocab_file = "../save/" + filename + ".vocab"
