@@ -211,6 +211,63 @@ class BPETokenizer:
         with open(vocab_file, "wb+") as f2:
             pickle.dump(self.vocab, f2)
 
+    def load(self, filename: str = "train_v1") -> "BPETokenizer":
+        """从保存的文件加载BPETokenizer实例"""
+        model_file = "../save/" + filename + ".model"
+        vocab_file = "../save/" + filename + ".vocab"
+
+        # 读取model文件（文本格式）
+        with open(model_file, "r") as f:
+            # 验证版本
+            version = f.readline().strip()
+            if version != "bpe tokenizer v1":
+                raise ValueError(f"不支持的模型版本: {version}")
+
+            # 读取pattern
+            self.pattern = f.readline().strip()
+            self.compiled_pattern = re.compile(self.pattern)
+
+            # 读取特殊token
+            special_tokens = {}
+            while True:
+                line = f.readline()
+                if not line:
+                    break  # 读到文件末尾（如果没有merges的情况）
+                line = line.strip()
+                # 特殊token行格式: "特殊token 索引"（注意特殊token可能包含空格，用最后一个空格分割）
+                if " " in line:
+                    parts = line.rsplit(" ", 1)  # 从右侧分割一次
+                    if len(parts) == 2 and parts[1].isdigit():
+                        special_token, idx = parts[0], int(parts[1])
+                        special_tokens[special_token] = idx
+                        continue
+                # 遇到非特殊token行则退出（开始读取merges）
+                f.seek(f.tell() - len(line) - 1)  # 回退指针
+                break
+            self.register_special_tokens(special_tokens)
+
+            # 读取merges
+            merges = {}
+            while True:
+                line = f.readline()
+                if not line:
+                    break
+                line = line.strip()
+                # merges行格式: "(a, b) v"（元组字符串 索引）
+                if line.startswith("(") and ")" in line and " " in line:
+                    # 解析元组键 (a, b)
+                    tuple_str, idx_str = line.split(")", 1)
+                    tuple_str += ")"  # 补全右括号
+                    idx = int(idx_str.strip())
+                    # 转换元组字符串为实际元组 (如"(1, 2)" -> (1, 2))
+                    a, b = map(int, tuple_str[1:-1].split(", "))
+                    merges[(a, b)] = idx
+            self.merges = merges
+
+        # 读取vocab文件（pickle二进制格式）
+        with open(vocab_file, "rb") as f:
+            self.vocab = pickle.load(f)
+
     def register_special_tokens(self, special_tokens: List[str]):
         self.special_tokens = special_tokens
         self.inverse_special_tokens = {v: bytes(k.encode("utf-8")) for k, v in special_tokens.items()}

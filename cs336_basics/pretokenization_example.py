@@ -3,6 +3,7 @@ import os
 import random
 from typing import BinaryIO
 import tokenizer
+import time
 
 
 def find_chunk_boundaries(
@@ -96,6 +97,8 @@ def load_and_sample_file(filepath: str, sample_size: int = 22000, special_token:
 
 if __name__ == "__main__":
 
+    start_time = time.time()
+
     vocab_size = 10000
     special_tokens = {
         '<|endoftext|>': 256,
@@ -109,9 +112,16 @@ if __name__ == "__main__":
     train_path = "/Users/bytedance/workspace/assignment1-basics/data/owt_valid.txt"
 
     sample = load_and_sample_file(train_path, sample_size)
+    load_time = time.time()
 
     tokenizer = tokenizer.BPETokenizer(special_tokens)
     tokenizer.train(sample, vocab_size, num_processes=num_processes, verbose=True)
+    # tokenizer.load("train_v1")
+
+    # print(f"\n✅ 加载文档耗时：{load_time - start_time:.2f}秒")
+    # print(f"\n✅ 训练耗时：{time.time() - load_time:.2f}秒")
+    # print(f"\n✅ 训练完成! 总耗时: {time.time() - start_time:.2f}秒")
+
     e = tokenizer.encode("hihihihihi, hi, 你好你好，你好 <|endoftext|>")
     d = tokenizer.decode(e)
     print(tokenizer.vocab)
