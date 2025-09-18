@@ -109,16 +109,16 @@ if __name__ == "__main__":
     vocab_size = 10000
     special_tokens = {
         '<|endoftext|>': 256,
-        '<|fim_prefix|>': 257,
-        '<|fim_middle|>': 258,
-        '<|fim_suffix|>': 259,
-        '<|endofprompt|>': 260
+        # '<|fim_prefix|>': 257,
+        # '<|fim_middle|>': 258,
+        # '<|fim_suffix|>': 259,
+        # '<|endofprompt|>': 260
     }
-    # sample_size = float("inf")
-    sample_size = 20000
+    sample_size = float("inf")
+    # sample_size = 20000
     num_processes = 8
-    # train_path = "/Users/bytedance/workspace/assignment1-basics/data/owt_valid.txt"
-    train_path = "/Users/bytedance/workspace/assignment1-basics/data/TinyStoriesV2-GPT4-train.txt"
+    train_path = "../data/owt_valid.txt"
+    # train_path = "../data/TinyStoriesV2-GPT4-train.txt"
 
     sample = load_and_sample_file(train_path, sample_size)
     load_time = time.time()

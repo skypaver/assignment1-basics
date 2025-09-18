@@ -63,6 +63,8 @@ def update_stats(stats: Dict[Tuple, int], new_ids: List[int], pair: Tuple[int, i
             stats[new_r_pair] = stats.get(new_r_pair, 0) + 1
             heapq.heappush(heap, (-stats[new_r_pair], new_r_pair)) if stats[new_r_pair] > 1 else None
 
+        return stats
+
 
 def init_max_heap(heap, stats):
     for pair, count in stats.items():
@@ -100,7 +102,7 @@ def pre_tokenize_doc(doc: str) -> List[str]:
     return chunk
 
 
-def utf8_chunk_encoder(chunk: str) -> List[bytes]:
+def utf8_chunk_encoder(chunk: str) -> List[int]:
     return list(chunk.encode("utf-8"))
 
 
@@ -118,7 +120,9 @@ def update_stats_wrapper(args, stats_lock, heap_lock, stats, heap):
 
 
 class BPETokenizer:
-    def __init__(self, special_tokens={}):
+    def __init__(self, special_tokens=None):
+        if special_tokens is None:
+            special_tokens = {}
         self.vocab = {}
         self.merges = {}
 
@@ -162,7 +166,7 @@ class BPETokenizer:
             ))
         return [seq for doc_seq in results for seq in doc_seq]
 
-    def utf8_multi_encoder(self, text_chunks: List[str], num_processes: int = 8) -> List[List[bytes]]:
+    def utf8_multi_encoder(self, text_chunks: List[str], num_processes: int = 8) -> List[List[int]]:
         if num_processes <= 1:
             result_generator = (utf8_chunk_encoder(chunk) for chunk in text_chunks)
             result = list(tqdm(
@@ -214,9 +218,9 @@ class BPETokenizer:
             get_stats(chunk_ids.encode("utf-8"), stats)
         # logging.info(f"get_stats_chunks_time: {time.time() - get_stats_chunks_time: .2f}")
 
-        init_heap_time = time.time()
+        # init_heap_time = time.time()
         init_max_heap(self.heap, stats)
-        logging.info(f"init_heap_time: {time.time() - init_heap_time: .2f}")
+        # logging.info(f"init_heap_time: {time.time() - init_heap_time: .2f}")
 
         with multiprocessing.Pool(num_processes) as pool:
             for i in tqdm(range(num_merges), desc="train"):
@@ -243,9 +247,9 @@ class BPETokenizer:
                     # desc="merge",
                     # leave=True
                 )
-                # logging.info(f"merge_time: {time.time() - merge_time: .2f}")
+                logging.info(f"merge_time: {time.time() - merge_time: .2f}")
 
-                # update_stats_time = time.time()
+                update_stats_time = time.time()
                 # update_args = [(new_ids, new_pos, pair, idx) for new_ids, new_pos in results]
                 # bound_update_func = partial(
                 #     update_stats_wrapper,
@@ -269,7 +273,7 @@ class BPETokenizer:
                     # logging.info(f"merge_time: {time.time() - merge_time: .2f}")
                     # update_stats_time = time.time()
                     update_stats(stats, new_ids, pair, idx, new_pos, self.heap)
-                    # logging.info(f"update_stats_time: {time.time() - update_stats_time: .2f}")
+                logging.info(f"update_stats_time: {time.time() - update_stats_time: .2f}")
                 logging.info(f"merge&update_stats_time: {time.time() - merge_time: .2f}")
 
                 vocab[idx] = vocab[pair[0]] + vocab[pair[1]]
