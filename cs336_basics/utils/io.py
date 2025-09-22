@@ -2,9 +2,8 @@ import mmap
 import os
 import random
 from typing import BinaryIO
-import tokenizer
-import time
-from typing import Dict, Tuple, List
+
+GPT2_PRETOKENIZER_PATTERN = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 
 
 def find_chunk_boundaries(
@@ -54,7 +53,7 @@ def find_chunk_boundaries(
     return sorted(set(chunk_boundaries))
 
 
-def load_and_sample_file(filepath: str, sample_size: int = 22000, special_token: str = "<|endoftext|>") -> str:
+def load_and_sample_file(filepath: str, sample_size: int = float("inf"), special_token: str = "<|endoftext|>") -> str:
     try:
         with open(filepath, "r+", encoding="utf-8", errors="ignore") as f:
             with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
@@ -80,13 +79,6 @@ def load_and_sample_file(filepath: str, sample_size: int = 22000, special_token:
         raise IOError(f"load data error: {e}")
 
 
-def evaluate_tokenizer(vocab: Dict[int, bytes], merges: Dict[Tuple[bytes, bytes], int]):
-    unique_tokens = set(vocab.values())
-    print(f"词汇表大小: {len(vocab):,}")
-    print(f"唯一token数: {len(unique_tokens):,}")
-    print(f"合并操作数: {len(merges):,}")
-
-
 ## Usage
 # with open("data/owt_valid.txt", "rb") as f:
 #     num_processes = 4
@@ -102,45 +94,3 @@ def evaluate_tokenizer(vocab: Dict[int, bytes], merges: Dict[Tuple[bytes, bytes]
 #         tokenizer.train(chunk, True)
 #         tokenizer.save("bpe_v1")
 #         break
-
-if __name__ == "__main__":
-    start_time = time.time()
-
-    vocab_size = 10000
-    special_tokens = {
-        '<|endoftext|>': 256,
-        # '<|fim_prefix|>': 257,
-        # '<|fim_middle|>': 258,
-        # '<|fim_suffix|>': 259,
-        # '<|endofprompt|>': 260
-    }
-    sample_size = float("inf")
-    # sample_size = 20000
-    num_processes = 8
-    train_path = "../data/owt_valid.txt"
-    # train_path = "../data/TinyStoriesV2-GPT4-train.txt"
-
-    sample = load_and_sample_file(train_path, sample_size)
-    load_time = time.time()
-
-    tokenizer = tokenizer.BPETokenizer(special_tokens)
-    tokenizer.train(sample, vocab_size, num_processes=num_processes, verbose=True)
-    # tokenizer.load("train_v1")
-
-    e = tokenizer.encode("hihihihihi, hi, 你好你好，你好 <|endoftext|>")
-    d = tokenizer.decode(e)
-    print(tokenizer.vocab)
-    print(f"e:{e}")
-    print(f"d:{d}")
-
-    print(f"\n✅ 加载文档耗时：{load_time - start_time:.2f}秒")
-    print(f"\n✅ 训练耗时：{time.time() - load_time:.2f}秒")
-    print(f"\n✅ 训练完成! 总耗时: {time.time() - start_time:.2f}秒， {(time.time() - start_time)/60:.2f}分钟")
-
-    evaluate_tokenizer(tokenizer.vocab, tokenizer.merges)
-
-    import psutil
-
-    process = psutil.Process()
-    mem_usage = process.memory_info().rss / (1024 ** 3)  # GB
-    print(f"💾 峰值内存使用: {mem_usage:.2f} GB")

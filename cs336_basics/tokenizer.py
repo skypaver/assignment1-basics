@@ -1,6 +1,6 @@
 import heapq
 import multiprocessing
-# from multiprocessing import Manager
+from collections import Counter
 from typing import Dict, Tuple, List
 import pickle
 import regex as re
@@ -98,8 +98,7 @@ def merge(ids: List[int], pair: Tuple[int, int], idx: int) -> Tuple[List[int], L
 
 def pre_tokenize_doc(doc: str) -> List[str]:
     compiled_pattern = re.compile(GPT2_PRETOKENIZER_PATTERN)
-    chunk = re.findall(compiled_pattern, doc)
-    return chunk
+    return Counter(re.findall(compiled_pattern, doc))
 
 
 def utf8_chunk_encoder(chunk: str) -> List[int]:
@@ -282,7 +281,7 @@ class BPETokenizer:
         self.vocab = vocab
         self.merges = merges
 
-        self.save()
+        # self.save()
 
         return
 
