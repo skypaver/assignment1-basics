@@ -2,7 +2,6 @@ from typing import Dict, Tuple, List
 from collections import Counter
 import regex as re
 import concurrent.futures
-from tqdm import tqdm
 
 import cs336_basics.utils.io as io
 
@@ -12,8 +11,8 @@ def _pre_tokenize(doc: str) -> Dict[str, int]:
     return Counter(re.findall(compiled_pattern, doc))
 
 
-def pre_tokenize(filepath: str, num_processes: int, special_tokens: List[str]) -> Dict[Tuple[bytes, ...], int]:
-    text = io.load_and_sample_file(filepath)
+def pre_tokenize(filepath: str, num_processes: int, special_tokens: List[str], sample_size: int) -> Dict[Tuple[bytes, ...], int]:
+    text = io.load_and_sample_file(filepath, sample_size=sample_size)
 
     for token in special_tokens:
         text = text.replace(token, "")
@@ -35,10 +34,3 @@ def pre_tokenize(filepath: str, num_processes: int, special_tokens: List[str]) -
         pre_token_freq[tuple([bytes([b]) for b in pre_token.encode("utf-8")])] = freq
 
     return pre_token_freq
-
-
-def evaluate_tokenizer(vocab: Dict[int, bytes], merges: Dict[Tuple[bytes, bytes], int]):
-    unique_tokens = set(vocab.values())
-    print(f"词汇表大小: {len(vocab):,}")
-    print(f"唯一token数: {len(unique_tokens):,}")
-    print(f"合并操作数: {len(merges):,}")

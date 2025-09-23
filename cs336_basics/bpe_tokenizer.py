@@ -7,7 +7,7 @@ from tqdm import tqdm
 import logging
 
 import cs336_basics.utils.io as io
-import cs336_basics.utils.tokenizer_utils as t_utils
+import cs336_basics.utils.pre_tokenizer as ptkn
 
 logging.basicConfig(
     level=logging.INFO,
@@ -32,7 +32,7 @@ class BPETokenizer:
 
         self.heap = []
 
-    def train(self, filepath: str, vocab_size: int, num_processes: int, special_tokens: List, progress_bar=False):
+    def train(self, filepath: str, vocab_size: int, num_processes: int, special_tokens: List, sample_size: int = float("inf"), progress_bar=False):
         logging.info(f"<--- New Train --->")
         vocab = {i: bytes([i]) for i in range(256)}
         for i, token in enumerate(special_tokens):
@@ -40,7 +40,7 @@ class BPETokenizer:
             self.special_tokens[vocab[256 + i]] = 256 + i
             self.inverse_special_tokens[256 + i] = vocab[256 + i]
 
-        pre_token_freq = t_utils.pre_tokenize(filepath, num_processes, special_tokens)
+        pre_token_freq = ptkn.pre_tokenize(filepath, num_processes, special_tokens, sample_size)
         # print(pre_token_freq)
 
         pair_freq = self.get_token_pair_freq(pre_token_freq, progress_bar)
@@ -79,17 +79,17 @@ class BPETokenizer:
             for chunk in text_chunks:
                 chunk_bytes = chunk.encode("utf-8")
                 chunk_ids = list(chunk_bytes)
-                # print(f"chunk_bytes: {chunk_bytes}, chunk_ids: {chunk_ids}")
 
                 while len(chunk_ids) > 1:
                     pairs = set()
                     for p in zip(chunk_ids[:-1], chunk_ids[1:]):
                         pairs.add(p)
-                    merge_pair = min(pairs, key=lambda pair: self.merges.get(pair, float('inf')))
-                    if merge_pair not in self.merges:
+
+                    merge_pair = min(pairs, key=lambda pair: self.merges.get(self.vocab[pair[0]] + self.vocab[pair[1]], float('inf')))
+                    if self.vocab[merge_pair[0]] + self.vocab[merge_pair[1]] not in self.merges:
                         break
 
-                    new_id = self.merges[merge_pair]
+                    new_id = self.merges[self.vocab[merge_pair[0]] + self.vocab[merge_pair[1]]]
                     new_ids = []
                     i = 0
                     while i < len(chunk_ids):
@@ -254,10 +254,10 @@ class BPETokenizer:
 if __name__ == "__main__":
     tokenizer = BPETokenizer()
     tokenizer.load("train_v1")
-    e = tokenizer.encode("Once upon a time there was a friendly little boy called Bob. peony")
+    e = tokenizer.encode("Once upon a time there was a friendly little boy called Bob. it")
     d = tokenizer.decode(e)
-    # print(tokenizer.vocab)
-    # print(tokenizer.merges)
-    print(tokenizer.merges[b' peony'])
+    print(tokenizer.vocab)
+    print(tokenizer.merges)
+    # print(tokenizer.merges[b'it'])
     print(f"e:{e}")
     print(f"d:{d}")

@@ -53,7 +53,7 @@ def find_chunk_boundaries(
     return sorted(set(chunk_boundaries))
 
 
-def load_and_sample_file(filepath: str, sample_size: int = float("inf"), special_token: str = "<|endoftext|>") -> str:
+def load_and_sample_file(filepath: str, sample_size: int = 200, special_token: str = "<|endoftext|>") -> str:
     try:
         with open(filepath, "r+", encoding="utf-8", errors="ignore") as f:
             with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
