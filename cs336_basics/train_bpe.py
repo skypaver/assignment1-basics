@@ -1,11 +1,6 @@
-import regex as re
-from typing import Dict, Tuple, List
-from collections import Counter
+from typing import Dict, Tuple
 import logging
-from tqdm import tqdm
 
-import cs336_basics.utils.io as io
-import cs336_basics.utils.tokenizer_utils as t_utils
 import cs336_basics.bpe_tokenizer as bpe
 
 logging.basicConfig(

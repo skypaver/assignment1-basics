@@ -13,7 +13,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(message)s',  # 可以包含时间戳
     handlers=[
-        logging.FileHandler("../logs/train_bpe_logs.txt"),  # 写入文件
+        # logging.FileHandler("../logs/train_bpe_logs.txt"),  # 写入文件
         # logging.StreamHandler()  # 同时输出到控制台
     ]
 )
@@ -32,7 +32,8 @@ class BPETokenizer:
 
         self.heap = []
 
-    def train(self, filepath: str, vocab_size: int, num_processes: int, special_tokens: List, sample_size: int = float("inf"), progress_bar=False):
+    def train(self, filepath: str, vocab_size: int, num_processes: int, special_tokens: List,
+              sample_size: int = float("inf"), progress_bar=False):
         logging.info(f"<--- New Train --->")
         vocab = {i: bytes([i]) for i in range(256)}
         for i, token in enumerate(special_tokens):
@@ -66,7 +67,7 @@ class BPETokenizer:
         self.vocab = vocab
         self.merges = merges
 
-        self.save()
+        # self.save()
 
         return
 
@@ -85,7 +86,8 @@ class BPETokenizer:
                     for p in zip(chunk_ids[:-1], chunk_ids[1:]):
                         pairs.add(p)
 
-                    merge_pair = min(pairs, key=lambda pair: self.merges.get(self.vocab[pair[0]] + self.vocab[pair[1]], float('inf')))
+                    merge_pair = min(pairs, key=lambda pair: self.merges.get(self.vocab[pair[0]] + self.vocab[pair[1]],
+                                                                             float('inf')))
                     if self.vocab[merge_pair[0]] + self.vocab[merge_pair[1]] not in self.merges:
                         break
 
@@ -254,10 +256,10 @@ class BPETokenizer:
 if __name__ == "__main__":
     tokenizer = BPETokenizer()
     tokenizer.load("train_v1")
-    e = tokenizer.encode("Once upon a time there was a friendly little boy called Bob. it")
+    e = tokenizer.encode("Once upon a time there was a friendly little boy called Bob. it peony, <|endoftext|>")
     d = tokenizer.decode(e)
     print(tokenizer.vocab)
     print(tokenizer.merges)
     # print(tokenizer.merges[b'it'])
-    print(f"e:{e}")
-    print(f"d:{d}")
+    print(f"e: {e}")
+    print(f"d: {d}")
